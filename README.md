@@ -1,7 +1,6 @@
 # 🏦 Zabbix Portal — Portal de Monitoração
 
 Portal web para visualização de dados do Zabbix, com controle de acesso por área.
-Desenvolvido para uso interno no Banco PAN e BTG Pactual.
 
 ---
 
