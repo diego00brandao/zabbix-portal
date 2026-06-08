@@ -86,20 +86,18 @@ zabbix-portal/
 ## Observabilidade
 
 * Dashboard operacional
-* Health Score
-* Trends
 * Timeline
 * Histórico de alertas
 * Triggers ativas
 * Inventário de hosts
 * Templates
 * Itens monitorados
+* e muito mais...
 
 ## Administração
 
 * Gestão de usuários
 * Gestão de áreas
-* RBAC
 * Aprovação de usuários
 * Controle de acesso por área
 
@@ -107,15 +105,13 @@ zabbix-portal/
 
 * Audit trail
 * Histórico operacional
-* Agrupamento de eventos
 * Timeline de mudanças
+* e muito mais...
 
 ## Multi-Connections
 
 * Múltiplos ambientes Zabbix
 * Seleção dinâmica de ambiente
-* Contexto persistente
-* Header `X-Connection-Id`
 
 ## Exportação
 
