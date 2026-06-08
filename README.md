@@ -236,20 +236,6 @@ sudo systemctl reload nginx
 
 ---
 
-# 🔮 Roadmap Futuro
-
-* Docker
-* CI/CD
-* Redis Cache
-* PostgreSQL
-* SSO
-* Grafana Integration
-* Prometheus Metrics
-* Logs Centralizados
-* Observabilidade do próprio portal
-
----
-
 # 👨‍💻 Autor
 
 Diego Brandão
