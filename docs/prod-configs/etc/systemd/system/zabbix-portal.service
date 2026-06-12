@@ -1,0 +1,15 @@
+[Unit]
+Description=Zabbix Portal Backend
+After=network.target
+
+[Service]
+Type=simple
+User=svc_zabbix
+WorkingDirectory=/opt/zabbix-portal/backend
+ExecStart=/usr/local/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
