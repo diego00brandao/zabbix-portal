@@ -1,238 +1,100 @@
-# 🚀 Observability Portal
+# Zabbix Observability Portal
 
-Plataforma corporativa de observabilidade e operação desenvolvida sobre o ecossistema do Zabbix.
+Portal web para monitoração e observabilidade construído sobre o Zabbix 6.0.42, oferecendo uma interface limpa e role-based para times não-técnicos.
 
-O Observability Portal centraliza informações operacionais, auditoria, alertas, tendências, inventário e métricas do ambiente em uma interface moderna baseada em React + Node.js.
+## Stack
 
----
+- **Backend:** Node.js + Express (porta 3001)
+- **Frontend:** React + Vite
+- **Banco:** SQLite (sql.js)
+- **Proxy:** Nginx
+- **API externa:** Zabbix 6.0.42 via JSON-RPC
 
-# 🏗️ Arquitetura
+## Features
 
-```text
-Usuário
-   ↓
-Nginx HTTPS
-   ↓
-Frontend React (/portal)
-   ↓
-Backend Node.js (/api)
-   ↓
-API Zabbix
+- Dashboard com KPIs, top hosts com problemas e histórico de alertas
+- Itens & Triggers unificado por template (com filtros LLD)
+- Multi-Zabbix: trocar entre conexões pós-login
+- Filtros por tecnologia (Database, Linux, Windows, Rede)
+- Change Log com projetos e atividades + upload de anexos
+- Audit Log com filtros por período e tipo
+- Relatórios consolidados (CSV, PDF, Excel)
+- Controle de acesso por área e role (admin/manager/viewer)
+- MCP server para integração com Claude (Alfred IA)
+- Ferramentas externas configuráveis no Dashboard
+
+## Setup
+
+### Docker (recomendado)
+Ver [docs/DOCKER.md](docs/DOCKER.md) para instruções completas.
+
+```bash
+git clone https://github.com/diego00brandao/zabbix-portal.git
+cd zabbix-portal
+cp .env.example .env
+# edita .env
+docker compose up -d --build
+# acessa http://localhost:8080/portal/
 ```
 
----
+### Manual (desenvolvimento)
+```bash
+# Backend
+cd backend
+npm install
+node server.js  # porta 3001
 
-# ⚙️ Stack Tecnológica
+# Frontend (outro terminal)
+cd frontend
+npm install
+npm run dev
+```
 
-## Frontend
+## Estrutura
 
-* React 18
-* Vite
-* React Router DOM
-* Axios
-* Recharts
-* Context API
-
-## Backend
-
-* Node.js
-* Express.js
-* JWT Authentication
-* Axios
-* SQL.js / SQLite
-
-## Infraestrutura
-
-* Linux
-* Nginx Reverse Proxy
-* systemd
-* HTTPS/TLS
-
----
-
-# 📁 Estrutura do Projeto
-
-```text
+```
 zabbix-portal/
-├── backend/
-│   ├── db/
-│   ├── middleware/
-│   ├── routes/
-│   ├── services/
-│   ├── package.json
-│   └── server.js
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── context/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   │
-│   ├── dist/
-│   ├── package.json
-│   └── vite.config.js
-│
-├── setup.sh
-└── README.md
+├── backend/              # API Node.js/Express
+│   ├── routes/           # auth, admin, connections, zabbix, reports, changelog, alfred, mcp...
+│   ├── services/         # zabbix.js (cliente JSON-RPC)
+│   ├── middleware/       # auth, area filtering
+│   ├── db/               # SQLite portal.db
+│   └── Dockerfile
+├── frontend/             # React + Vite
+│   ├── src/pages/        # Dashboard, Alertas, Servidores, Itens & Triggers, Change Log...
+│   ├── src/components/   # Layout, AuthContext
+│   ├── nginx.conf        # config do container
+│   └── Dockerfile
+├── docs/
+│   ├── DOCKER.md         # instruções de deploy via Docker
+│   └── prod-configs/     # configs de referência do ambiente de produção
+└── docker-compose.yml
 ```
 
----
+## Deploy em produção (offline)
 
-# 🔐 Funcionalidades
+Ver [docs/DOCKER.md](docs/DOCKER.md) — seção "Deploy offline".
 
-## Observabilidade
+## Tecnologias monitoradas
 
-* Dashboard operacional
-* Timeline
-* Histórico de alertas
-* Triggers ativas
-* Inventário de hosts
-* Templates
-* Itens monitorados
-* e muito mais...
+Detecção automática por padrão de nome de host:
+- **SQL Server** — `MSSQL`, `PSQL`, `ORACLE`, `BD`
+- **Linux** — `LNX`, `LINUX`
+- **Windows** — `WIN`, `WND`, `SRV`
+- **Rede** — `RTR`, `SW`, `FW`, `NET`
 
-## Administração
+## Roles
 
-* Gestão de usuários
-* Gestão de áreas
-* Aprovação de usuários
-* Controle de acesso por área
+| Role     | Acesso                                                                |
+|----------|-----------------------------------------------------------------------|
+| admin    | Tudo: usuários, áreas, conexões, ferramentas, todos os dados          |
+| manager  | Templates, ferramentas, todos os dados                                |
+| viewer   | Itens & Triggers do template da sua área, alertas, servidores         |
 
-## Auditoria
+## Out of scope
 
-* Audit trail
-* Histórico operacional
-* Timeline de mudanças
-* e muito mais...
-
-## Multi-Connections
-
-* Múltiplos ambientes Zabbix
-* Seleção dinâmica de ambiente
-
-## Exportação
-
-* CSV
-* JSON
-* Excel
-
----
-
-# 🔑 Controle de Acesso
-
-| Perfil  | Permissões         |
-| ------- | ------------------ |
-| admin   | Controle total     |
-| manager | Gestão operacional |
-| viewer  | Somente leitura    |
-
----
-
-# 🚀 Deploy Produção
-
-## Backend
-
-```bash
-cd /opt/zabbix-portal/backend
-npm install
-sudo systemctl restart zabbix-portal
-```
-
-## Frontend
-
-```bash
-cd /opt/zabbix-portal/frontend
-npm install
-npm run build -- --base=/portal/
-sudo systemctl reload nginx
-```
-
----
-
-# 🌐 Nginx
-
-## Portal React
-
-```nginx
-location ^~ /portal {
-    alias /opt/zabbix-portal/frontend/dist/;
-    try_files $uri $uri/ /portal/index.html;
-}
-```
-
-## Backend API
-
-```nginx
-location ^~ /api/ {
-    proxy_pass http://localhost:3001;
-}
-```
-
----
-
-# 🧠 Backend API
-
-## Principais endpoints
-
-| Método | Endpoint                    | Descrição     |
-| ------ | --------------------------- | ------------- |
-| POST   | /api/auth/login             | Login         |
-| GET    | /api/auth/me                | Usuário atual |
-| GET    | /api/zabbix/dashboard       | Dashboard     |
-| GET    | /api/zabbix/hosts           | Hosts         |
-| GET    | /api/zabbix/triggers/active | Alertas       |
-| GET    | /api/zabbix/items           | Itens         |
-| GET    | /api/reports/*              | Exportações   |
-| GET    | /api/connections            | Ambientes     |
-
----
-
-# 🛡️ Segurança
-
-* JWT Authentication
-* Middleware de autenticação
-* Rate Limiting
-* Controle RBAC
-* Segmentação por área
-* HTTPS Reverse Proxy
-* Sessão autenticada
-
----
-
-# 📊 Observabilidade Operacional
-
-O portal implementa conceitos de observabilidade operacional para:
-
-* visualização consolidada
-* troubleshooting
-* análise de tendências
-* acompanhamento de incidentes
-* correlação operacional
-
----
-
-# 🐧 Ambiente Linux
-
-## Serviço systemd
-
-```bash
-systemctl status zabbix-portal
-journalctl -u zabbix-portal -f
-```
-
-## Nginx
-
-```bash
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
----
-
-# 👨‍💻 Autor
-
-Diego Brandão
-GitHub: https://github.com/diego00brandao
+- SLA reporting
+- War Room / Incident management (usar ServiceNow)
+- Health scores
+- On-call / escalation
+- SSL certificate management
