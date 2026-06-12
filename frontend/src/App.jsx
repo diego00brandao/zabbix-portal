@@ -13,6 +13,7 @@ import { Hosts, Templates } from './pages/HostsAndTemplates';
 import Groups from './pages/Groups';
 import Maintenance from './pages/Maintenance';
 import ItemErrors from './pages/ItemErrors';
+import ItemsTriggers from './pages/ItemsTriggers';
 import ChangeLog from './pages/ChangeLog';
 import Alfred from './pages/Alfred';
 import DashboardLinks from './pages/DashboardLinks';
@@ -32,6 +33,12 @@ function PrivateRoute({ children }) {
   return user ? children : <Navigate to="/login" replace />;
 }
 
+function ViewerOnly({ children }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== 'viewer') return <Navigate to="/" replace />;
+  return children;
+}
 export default function App() {
   return (
     <AuthProvider>
@@ -52,6 +59,7 @@ export default function App() {
             <Route path="admin/connections" element={<Connections />} />
             <Route path="admin/users" element={<Users />} />
             <Route path="item-errors" element={<ItemErrors />} />
+            <Route path="items-triggers" element={<ViewerOnly><ItemsTriggers /></ViewerOnly>} />
             <Route path="changelog" element={<ChangeLog />} />
             <Route path="alfred" element={<Alfred />} />
             <Route path="ferramentas" element={<DashboardLinks />} />

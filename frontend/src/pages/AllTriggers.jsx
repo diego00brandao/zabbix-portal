@@ -1,3 +1,4 @@
+import { useAuth } from '../context/AuthContext';
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../services/api';
@@ -15,6 +16,7 @@ const SEVERITY_MAP = {
 
 export default function AllTriggers() {
   const location = useLocation();
+  const { user } = useAuth();
   const [triggers, setTriggers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
@@ -23,6 +25,7 @@ export default function AllTriggers() {
   const [error, setError] = useState('');
   const [expandedTrigger, setExpandedTrigger] = useState(null);
   const [page, setPage] = useState(1);
+  const [techFilter, setTechFilter] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -63,7 +66,14 @@ export default function AllTriggers() {
     URL.revokeObjectURL(url);
   }
 
-  const filtered = triggers.filter(t => {
+  const filtered = triggers.filter(a => {
+    const n = (a.hosts?.map(h=>h.name).join(' ')||'').toUpperCase();
+    if (techFilter === 'SQL' && !n.match(/SQL|PSQL|MSSQL|ORACLE|BD/)) return false;
+    if (techFilter === 'LINUX' && !n.match(/LNX|LINUX/)) return false;
+    if (techFilter === 'WINDOWS' && !n.match(/WIN|WND|W0[0-9]|SRV/)) return false;
+    if (techFilter === 'REDE' && !n.match(/RTR|SW|FW|NET/)) return false;
+    return true;
+  }).filter(t => {
     const matchText = !filter ||
       t.description?.toLowerCase().includes(filter.toLowerCase()) ||
       t.hosts?.some(h => h.name?.toLowerCase().includes(filter.toLowerCase()));
@@ -95,7 +105,20 @@ export default function AllTriggers() {
       </div>
 
       <div style={styles.filters}>
-        <input
+        {(!user || user.role === 'admin' || user.role === 'manager') && (
+        <div style={{ display:'flex', gap:'8px', marginBottom:'12px', flexWrap:'wrap' }}>
+          {[['','Todos'],['SQL','🗄 Database'],['LINUX','🐧 Linux'],['WINDOWS','🖥 Windows'],['REDE','🌐 Rede']].map(([key,label])=>(
+            <button key={key} onClick={()=>setTechFilter(key)}
+              style={{ padding:'5px 14px', borderRadius:'var(--radius)', border:'1px solid', fontSize:'12px', cursor:'pointer',
+                background: techFilter===key?'var(--gold-dim)':'var(--bg-hover)',
+                color: techFilter===key?'var(--gold)':'var(--text-muted)',
+                borderColor: techFilter===key?'rgba(201,168,76,0.4)':'var(--border)' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        )}
+      <input
           placeholder="Filtrar por trigger ou host..."
           value={filter}
           onChange={e => setFilter(e.target.value)}
@@ -124,7 +147,7 @@ export default function AllTriggers() {
       <div style={styles.table}>
         <div style={styles.tableHeader}>
           <span>Trigger</span>
-          <span>Host</span>
+          <span>Template</span>
           <span>Severidade</span>
           <span>Status</span>
           <span>Última mudança</span>

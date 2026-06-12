@@ -42,6 +42,21 @@ export default function Maintenance() {
     if (!ts || ts === '0') return '—';
     return new Date(parseInt(ts) * 1000).toLocaleString('pt-BR');
   }
+  function timeRemaining(m) {
+    const till = parseInt(m.active_till);
+    const since = parseInt(m.active_since);
+    const ref = now >= since && now <= till ? till : (now < since ? since : null);
+    if (!ref) return null;
+    const diff = ref - now;
+    if (diff <= 0) return null;
+    const days = Math.floor(diff / 86400);
+    const hours = Math.floor((diff % 86400) / 3600);
+    const mins = Math.floor((diff % 3600) / 60);
+    const label = now >= since ? 'Expira em' : 'Inicia em';
+    if (days > 0) return `${label}: ${days}d ${hours}h`;
+    if (hours > 0) return `${label}: ${hours}h ${mins}min`;
+    return `${label}: ${mins}min`;
+  }
 
   return (
     <div style={styles.root}>
@@ -83,11 +98,18 @@ export default function Maintenance() {
                     </span>
                     <div style={styles.name}>{m.name}</div>
                   </div>
-                  <div style={styles.dates}>
-                    <span style={styles.dateLabel}>Início:</span>
-                    <span style={styles.dateValue}>{fmtDate(m.active_since)}</span>
-                    <span style={styles.dateLabel}>Fim:</span>
-                    <span style={styles.dateValue}>{fmtDate(m.active_till)}</span>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px' }}>
+                    <div style={styles.dates}>
+                      <span style={styles.dateLabel}>Início:</span>
+                      <span style={styles.dateValue}>{fmtDate(m.active_since)}</span>
+                      <span style={styles.dateLabel}>Fim:</span>
+                      <span style={styles.dateValue}>{fmtDate(m.active_till)}</span>
+                    </div>
+                    {timeRemaining(m) && (
+                      <span style={{ fontSize:'11px', fontFamily:'var(--font-mono)', color: getStatus(m).label === 'Ativa' ? 'var(--orange)' : 'var(--blue)', background: getStatus(m).label === 'Ativa' ? 'var(--orange-dim)' : 'var(--blue-dim)', padding:'2px 8px', borderRadius:'4px' }}>
+                        ⏱ {timeRemaining(m)}
+                      </span>
+                    )}
                   </div>
                 </div>
 

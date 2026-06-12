@@ -23,8 +23,12 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await login(form.username, form.password);
-      navigate('/');
+      const result = await login(form.username, form.password);
+      if (result?.needsSelect) {
+        navigate('/select-connection');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Falha na autenticação');
     } finally {

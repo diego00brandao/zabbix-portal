@@ -2,8 +2,61 @@ const express = require('express');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 const { db } = require('../db/database');
 const zabbix = require('../services/zabbix');
+const { friendlyTriggerName } = require('../services/zabbix');
+
+// Get admin token for auditlog (requires super admin)
+let _adminToken = null;
+let _adminTokenTime = 0;
+async function getAdminToken() {
+  if (_adminToken && Date.now() - _adminTokenTime < 3600000) return _adminToken;
+  try {
+    const res = await fetch('https://localhost/api_jsonrpc.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc:'2.0', method:'user.login', params:{ user:'Admin', password:'zabbix' }, id:1 }),
+    });
+    const data = await res.json();
+    _adminToken = data.result;
+    _adminTokenTime = Date.now();
+    return _adminToken;
+  } catch { return null; }
+}
 const ExcelJS = require('exceljs');
 const router = express.Router();
+
+// ── Cache em memória (TTL 24h para dados estáticos de admin) ──────────────
+const _cache = {};
+function cacheGet(key) {
+  const e = _cache[key];
+  if (!e) return null;
+  if (Date.now() - e.ts > e.ttl) { delete _cache[key]; return null; }
+  return e.data;
+}
+function cacheSet(key, data, ttlMs) {
+  _cache[key] = { data, ts: Date.now(), ttl: ttlMs };
+}
+function cacheClear(prefix) {
+  Object.keys(_cache).forEach(k => { if (k.startsWith(prefix)) delete _cache[k]; });
+}
+const TTL_24H = 24 * 60 * 60 * 1000;
+const TTL_5M  =  5 * 60 * 1000;
+// ─────────────────────────────────────────────────────────────────────────
+
+function formatDelayStr(delay) {
+  if (!delay) return 'N/A';
+  const match = String(delay).match(/^(\d+)([smhd]?)$/);
+  if (!match) return delay;
+  const [, num, unit] = match;
+  const n = parseInt(num);
+  const units = { s: 'seg', m: 'min', h: 'hora(s)', d: 'dia(s)' };
+  if (!unit || unit === 's') {
+    if (n >= 86400) return (n/86400) + ' dia(s)';
+    if (n >= 3600) return (n/3600) + ' hora(s)';
+    if (n >= 60) return (n/60) + ' min';
+    return n + ' seg';
+  }
+  return n + ' ' + (units[unit] || unit);
+}
 
 function getGroupIds(req) {
   if (req.user.role === 'admin') return null;
@@ -32,6 +85,54 @@ function applyAreaConnection(req) {
   const ids = JSON.parse(area.zabbix_connection_ids || '[]');
   zabbix.setCurrentConnection(ids.length > 0 ? ids[0] : null);
 }
+
+router.get('/hosts-full', authMiddleware, async (req, res) => {
+  try {
+    applyAreaConnection(req);
+    const groupIds = getGroupIds(req);
+    const hosts = await zabbix.call('host.get', {
+      output: ['hostid','name','host','available','status'],
+      selectParentTemplates: ['templateid','name'],
+      selectGroups: ['groupid','name'],
+      countOutput: false,
+      groupids: groupIds||undefined,
+      filter: { status: 0 },
+      selectTriggers: 'count',
+      monitored_hosts: true,
+    }, false);
+    // Add problems count
+    const problems = await zabbix.call('problem.get', {
+      output: ['objectid'],
+      suppressed: false,
+      recent: true,
+    }, false);
+    const problemMap = {};
+    for (const p of problems) { problemMap[p.objectid] = (problemMap[p.objectid]||0)+1; }
+    const triggers = await zabbix.call('trigger.get', {
+      output: ['triggerid','hostid'],
+      hostids: hosts.map(h=>h.hostid),
+      filter: { value: 1 },
+      monitored: true,
+    }, false);
+    const hostProblems = {};
+    for (const t of triggers) { hostProblems[t.hostid] = (hostProblems[t.hostid]||0)+1; }
+    const result = hosts.map(h => ({ ...h, problems_count: hostProblems[h.hostid]||0 }));
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/trigger-audit/:triggerid', authMiddleware, async (req, res) => {
+  try {
+    applyAreaConnection(req);
+    const logs = await zabbix.call('auditlog.get', {
+      output: 'extend',
+      sortfield: 'clock', sortorder: 'DESC',
+      limit: 5000,
+    }, false);
+    const entry = logs.find(l => String(l.resourceid) === String(req.params.triggerid) && String(l.resourcetype) === '13');
+    res.json(entry || null);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
@@ -70,9 +171,18 @@ router.get('/hosts/disabled', authMiddleware, async (req, res) => {
 });
 
 router.get('/templates', authMiddleware, async (req, res) => {
+  const ckey = 'templates';
   try {
+    const cached = cacheGet(ckey);
+    if (cached) {
+      const templateIds = getTemplateIds(req);
+      if (templateIds === null) return res.json(cached);
+      if (templateIds.length === 0) return res.json([]);
+      return res.json(cached.filter(t => templateIds.includes(t.templateid)));
+    }
     applyAreaConnection(req);
     const templates = await zabbix.getTemplates(getGroupIds(req));
+    cacheSet('templates', templates, TTL_24H);
     const templateIds = getTemplateIds(req);
     if (templateIds === null) return res.json(templates);
     if (templateIds.length === 0) return res.json([]);
@@ -81,16 +191,26 @@ router.get('/templates', authMiddleware, async (req, res) => {
 });
 
 router.get('/template/:id/items', authMiddleware, async (req, res) => {
+  const ckey = `tpl_items_${req.params.id}`;
+  const cached = cacheGet(ckey);
+  if (cached) return res.json(cached);
   try {
     applyAreaConnection(req);
-    res.json(await zabbix.getTemplateItems(req.params.id));
+    const data = await zabbix.getTemplateItems(req.params.id);
+    cacheSet(ckey, data, TTL_24H);
+    res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/template/:id/triggers', authMiddleware, async (req, res) => {
+  const ckey = `tpl_triggers_${req.params.id}`;
+  const cached = cacheGet(ckey);
+  if (cached) return res.json(cached);
   try {
     applyAreaConnection(req);
-    res.json(await zabbix.getTemplateTriggers(req.params.id));
+    const data = await zabbix.getTemplateTriggers(req.params.id);
+    cacheSet(ckey, data, TTL_24H);
+    res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -367,28 +487,35 @@ router.get('/triggers/active', authMiddleware, async (req, res) => {
 });
 
 router.get('/triggers', authMiddleware, async (req, res) => {
+  const ckey = `triggers_${req.user.area_id || 'all'}`;
+  const cached = cacheGet(ckey);
+  if (cached) return res.json(cached);
+  // cacheSet aplicado inline abaixo
   try {
     const groupIds     = getGroupIds(req);
     const tplIds       = getTemplateIds(req);
-    const hostTriggers = await zabbix.getAllTriggers(groupIds);
-
-    // Para admin (tplIds === null), busca todos os templates
-    // Para usuário com área, busca só os templates da área
     const allTemplates = await zabbix.getTemplates();
-    const idsToFetch   = tplIds === null
-      ? allTemplates.map(t => t.templateid)
-      : tplIds;
 
-    if (!idsToFetch || idsToFetch.length === 0) return res.json(hostTriggers);
-
-    const tplResults  = await Promise.all(idsToFetch.map(id => zabbix.getTemplateTriggers(id).catch(() => [])));
-    const tplTriggers = tplResults.flat().map(t => ({
-      ...t,
-      hosts: [{ name: allTemplates.find(tpl => tpl.templateid === t.templateid)?.name || 'Template', host: 'template' }],
-    }));
-
-    const seen = new Set(hostTriggers.map(t => t.triggerid));
-    const result = [...hostTriggers, ...tplTriggers.filter(t => !seen.has(t.triggerid))];
+    let result;
+    if (tplIds && tplIds.length > 0) {
+      // Viewer por area: so templates
+      const tplResults  = await Promise.all(tplIds.map(id => zabbix.getTemplateTriggers(id).catch(() => [])));
+      result = tplResults.flat().map(t => ({
+        ...t,
+        hosts: [{ name: allTemplates.find(tpl => tpl.templateid === t.templateid)?.name || 'Template', host: 'template' }],
+      }));
+    } else {
+      // Admin: host triggers + template triggers
+      const hostTriggers = await zabbix.getAllTriggers(groupIds);
+      const idsToFetch   = allTemplates.map(t => t.templateid);
+      const tplResults   = await Promise.all(idsToFetch.map(id => zabbix.getTemplateTriggers(id).catch(() => [])));
+      const tplTriggers  = tplResults.flat().map(t => ({
+        ...t,
+        hosts: [{ name: allTemplates.find(tpl => tpl.templateid === t.templateid)?.name || 'Template', host: 'template' }],
+      }));
+      const seen = new Set(hostTriggers.map(t => t.triggerid));
+      result = [...hostTriggers, ...tplTriggers.filter(t => !seen.has(t.triggerid))];
+    }
 
     if (req.query.format === 'csv') {
       const SEV = {'5':'DISASTER','4':'HIGH','3':'AVERAGE','2':'WARNING','1':'INFORMATION','0':'N/C'};
@@ -403,29 +530,34 @@ router.get('/triggers', authMiddleware, async (req, res) => {
       res.setHeader('Content-Disposition', 'attachment; filename="triggers.csv"');
       return res.send('\uFEFF' + [header, ...rows].join('\n'));
     }
-
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 
 router.get('/items', authMiddleware, async (req, res) => {
+  const ckey = `items_${req.user.area_id || 'all'}`;
+  const cached = cacheGet(ckey);
+  if (cached) return res.json(cached);
+  // cacheSet aplicado inline abaixo
   try {
     const groupIds  = getGroupIds(req);
     const tplIds    = getTemplateIds(req);
-    const hostItems = await zabbix.getItems(groupIds, req.query.search || '');
-
-    if (!tplIds || tplIds.length === 0) return res.json(hostItems);
-
     const allTemplates = await zabbix.getTemplates();
-    const tplResults   = await Promise.all(tplIds.map(id => zabbix.getTemplateItems(id).catch(() => [])));
-    const tplItems     = tplResults.flat().map(item => ({
-      ...item,
-      hosts: [{ name: allTemplates.find(t => t.templateid === item.templateid)?.name || 'Template', host: 'template' }],
-    }));
 
-    const seen = new Set(hostItems.map(i => i.itemid));
-    res.json([...hostItems, ...tplItems.filter(i => !seen.has(i.itemid))]);
+    if (tplIds && tplIds.length > 0) {
+      // Viewer por area: so templates
+      const tplResults = await Promise.all(tplIds.map(id => zabbix.getTemplateItems(id).catch(() => [])));
+      const tplItems   = tplResults.flat().map(item => ({
+        ...item,
+        hosts: [{ name: allTemplates.find(t => t.templateid === item.templateid)?.name || 'Template', host: 'template' }],
+      }));
+      cacheSet(ckey, tplItems, TTL_24H);
+      return res.json(tplItems);
+    }
+    const hostItems = await zabbix.getItems(groupIds, req.query.search || '');
+    cacheSet(ckey, hostItems, TTL_24H);
+    res.json(hostItems);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -1,3 +1,69 @@
+
+function friendlyTriggerName(expression, description) {
+  if (!expression) return description;
+  const e = expression.toLowerCase();
+  const descL = (description||'').toLowerCase();
+  
+  // Memory
+  if (e.includes('memory.util') || e.includes('vm.memory')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/);
+    const val = m ? m[1] : null;
+    if (e.includes('nodata')) return 'Memória: sem dados';
+    if (val) return `Memória acima de ${val}%`;
+    return 'Utilização de memória elevada';
+  }
+  // CPU
+  if (e.includes('cpu.util') || e.includes('system.cpu')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/);
+    const val = m ? m[1] : null;
+    if (e.includes('nodata')) return 'CPU: sem dados';
+    if (val) return `CPU acima de ${val}%`;
+    return 'Utilização de CPU elevada';
+  }
+  // Disk
+  if (e.includes('vfs.fs') || e.includes('disk')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/);
+    const val = m ? m[1] : null;
+    if (val) return `Disco acima de ${val}%`;
+    return 'Uso de disco elevado';
+  }
+  // No data / ping
+  if (e.includes('nodata') || e.includes('agent.ping')) {
+    const m = expression.match(/nodata.*?(\d+)([mhd])/i);
+    if (m) {
+      const unit = {m:'min',h:'hora',d:'dia'}[m[2]] || m[2];
+      return `Sem dados há ${m[1]} ${unit}`;
+    }
+    return 'Host sem comunicação';
+  }
+  // Network
+  if (e.includes('net.if') || e.includes('network')) {
+    if (e.includes('error')) return 'Erros de rede detectados';
+    return 'Problema de rede';
+  }
+  // Service down
+  if (e.includes('service') || e.includes('proc.num')) {
+    return 'Serviço indisponível';
+  }
+  // Replication
+  if (descL.includes('replication') || e.includes('replication')) {
+    return 'Problema de replicação';
+  }
+  // Backup
+  if (descL.includes('backup') || e.includes('backup')) {
+    return 'Falha no backup';
+  }
+  // Database
+  if (e.includes('db.') || e.includes('odbc') || descL.includes('database')) {
+    return 'Problema no banco de dados';
+  }
+  // Jobs
+  if (descL.includes('job') || descL.includes('jobs failed')) {
+    return 'Jobs com falha';
+  }
+  return description;
+}
+
 const axios = require('axios');
 const { getCached, setCache } = require('../db/database');
 
@@ -100,7 +166,7 @@ async function getAllHosts(groupIds) {
     limit: 2000,
   };
   if (groupIds && groupIds.length > 0) params.groupids = groupIds;
-  const hosts = await call('host.get', params, true, 120);
+  const hosts = await call('host.get', params, true, 86400);
   return hosts.map(h => ({
     ...h,
     available: h.interfaces?.[0]?.available || h.available || '0',
@@ -136,12 +202,20 @@ async function getTemplates(groupIds) {
 }
 
 async function getTemplateItems(templateId) {
-  const items = await call('item.get', {
-    output: ['itemid', 'name', 'key_', 'type', 'delay', 'history', 'trends', 'units', 'params', 'status', 'description', 'error'],
-    templateids: [templateId],
-    limit: 500,
-  }, true, 180);
- return items.map(item => ({
+  const [items, prototypes] = await Promise.all([
+    call('item.get', {
+      output: ['itemid', 'name', 'key_', 'type', 'delay', 'history', 'trends', 'units', 'params', 'status', 'description', 'error'],
+      templateids: [templateId],
+      limit: 500,
+    }, true, 180),
+    call('itemprototype.get', {
+      output: ['itemid', 'name', 'key_', 'type', 'delay', 'units', 'params', 'status', 'description'],
+      templateids: [templateId],
+      limit: 500,
+    }, true, 180).catch(() => []),
+  ]);
+  const allItems = [...items, ...prototypes.map(p => ({ ...p, isPrototype: true }))];
+  return allItems.map(item => ({
     ...item,
     templateid: templateId,
     isQuery: item.type === '11' || item.key_?.startsWith('db.odbc') || item.key_?.startsWith('db.query'),
@@ -151,13 +225,22 @@ async function getTemplateItems(templateId) {
 }
 
 async function getTemplateTriggers(templateId) {
-  const triggers = await call('trigger.get', {
-    output: ['triggerid', 'description', 'priority', 'status', 'expression', 'comments'],
-    templateids: [templateId],
-    sortfield: 'priority', sortorder: 'DESC',
-    expandExpression: true,
-  }, true, 180);
-  return triggers.map(t => ({ ...t, templateid: templateId }));
+  const [triggers, prototypes] = await Promise.all([
+    call('trigger.get', {
+      output: ['triggerid', 'description', 'priority', 'status', 'expression', 'comments'],
+      templateids: [templateId],
+      sortfield: 'priority', sortorder: 'DESC',
+      expandExpression: true,
+    }, true, 180),
+    call('triggerprototype.get', {
+      output: ['triggerid', 'description', 'priority', 'status', 'expression'],
+      templateids: [templateId],
+      sortfield: 'priority', sortorder: 'DESC',
+      expandExpression: true,
+    }, true, 180).catch(() => []),
+  ]);
+  const all = [...triggers, ...prototypes.map(p => ({ ...p, isPrototype: true }))];
+  return all.map(t => ({ ...t, templateid: templateId }));
 }
 
 async function getHostItems(hostId) {
@@ -178,9 +261,10 @@ async function getHostItems(hostId) {
 
 async function getHostTriggers(hostId) {
   return call('trigger.get', {
-    output: ['triggerid', 'description', 'priority', 'status', 'expression', 'lastchange'],
+    output: ['triggerid', 'description', 'priority', 'status', 'expression', 'lastchange', 'comments'],
     hostids: [hostId],
     sortfield: 'priority', sortorder: 'DESC',
+    expandExpression: true,
   }, true, 120);
 }
 
@@ -188,6 +272,7 @@ async function getHostAlerts(hostId) {
   return call('trigger.get', {
     output: ['triggerid', 'description', 'priority', 'status', 'expression', 'lastchange'],
     hostids: [hostId],
+    expandExpression: true,
     only_true: 1,
     filter: { value: 1 },
     monitored: true,
@@ -272,13 +357,13 @@ async function getAllTriggers(groupIds) {
 async function getItems(groupIds, searchQuery = '') {
   const params = {
     output: ['itemid', 'name', 'key_', 'type', 'value_type', 'delay', 'history',
-             'trends', 'units', 'params', 'lastvalue', 'lastclock', 'status', 'description', 'error'],
+             'trends', 'units', 'params', 'lastvalue', 'lastclock', 'status', 'description', 'error', 'master_itemid'],
     selectHosts: ['host', 'name'],
     webitems: true, filter: {}, limit: 5000,
   };
   if (groupIds && groupIds.length > 0) params.groupids = groupIds;
   if (searchQuery) params.search = { name: searchQuery, key_: searchQuery };
-  const items = await call('item.get', params, true, 300);
+  const items = await call('item.get', params, true, 86400);
   return items.map(item => ({
     ...item,
     isQuery: item.type === '11' || item.key_?.startsWith('db.odbc') || item.key_?.startsWith('db.query'),
@@ -343,6 +428,291 @@ function getItemTypeLabel(type) {
   };
   return types[String(type)] || `Type ${type}`;
 }
+
+async function getHostMacros(hostids) {
+  try {
+    const hostMacros = await call('usermacro.get', { output: ['macro','value'], hostids }, false);
+    const globalMacros = await call('usermacro.get', { output: ['macro','value'], globalmacro: true }, false);
+    const map = {};
+    for (const m of [...globalMacros, ...hostMacros]) map[m.macro] = m.value;
+    return map;
+  } catch { return {}; }
+}
+
+function resolveMacros(str, macroMap) {
+  if (!str || typeof str !== "string") return str;
+  return str.replace(/\{\$[^}]+\}/g, function(m) { return macroMap[m] !== undefined ? macroMap[m] : m; });
+}
+
+async function getZabbixVersion() {
+  try {
+    const res = await zabbixAPI.post(getZabbixURL(), {
+      jsonrpc: '2.0', method: 'apiinfo.version', params: {}, id: 1,
+    });
+    return res.data.result || '—';
+  } catch { return '—'; }
+}
+
+async function getZabbixStatus() {
+  try {
+    await call('apiinfo.version', {}, false);
+    return { online: true };
+  } catch { return { online: false }; }
+}
+
+async function getRecentAlerts(groupIds, limit = 5) {
+  const params = {
+    output: ['triggerid', 'description', 'priority', 'lastchange'],
+    selectHosts: ['host', 'name'],
+    only_true: 1, filter: { value: 1 }, monitored: true, active: true,
+    sortfield: 'lastchange', sortorder: 'DESC', limit,
+  };
+  if (groupIds && groupIds.length > 0) params.groupids = groupIds;
+  return call('trigger.get', params, false);
+}
+
+async function getTopHostsWithProblems(groupIds, limit = 5) {
+  const alerts = await getTriggersActive(groupIds);
+  const hostCount = {};
+  const hostNames = {};
+  alerts.forEach(t => {
+    t.hosts?.forEach(h => {
+      hostCount[h.hostid] = (hostCount[h.hostid] || 0) + 1;
+      hostNames[h.hostid] = h.name;
+    });
+  });
+  return Object.entries(hostCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([hostid, count]) => ({ hostid, name: hostNames[hostid], alerts: count }));
+}
+
+async function getItemsWithError(groupIds) {
+  const params = {
+    output: ['itemid', 'name', 'key_', 'error', 'lastclock'],
+    selectHosts: ['host', 'name'],
+    monitored: true, webitems: true, filter: {},
+    search: { error: ' ' }, searchWildcardsEnabled: false, limit: 50,
+  };
+  if (groupIds && groupIds.length > 0) params.groupids = groupIds;
+  try {
+    const items = await call('item.get', params, false);
+    return items.filter(i => i.error && i.error.trim() !== '');
+  } catch { return []; }
+}
+
+async function getAlertHistory(groupIds, days = 7) {
+  const result = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    result.push({ date: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), count: 0 });
+  }
+  try {
+    const timeTill = Math.floor(Date.now() / 1000);
+    const timeFrom = timeTill - (days * 86400);
+    const params = { output: ['clock', 'objectid'], source: 0, object: 0, value: 1, time_from: timeFrom, time_till: timeTill };
+    if (groupIds && groupIds.length > 0) params.groupids = groupIds;
+    const events = await call('event.get', params, false);
+    events.forEach(e => {
+      const d = new Date(parseInt(e.clock) * 1000);
+      const label = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      const found = result.find(r => r.date === label);
+      if (found) found.count++;
+    });
+  } catch {}
+  return result;
+}
+
+async function getHostTrends(hostId, period = '1d', fromDate = null, toDate = null) {
+  const now = Math.floor(Date.now() / 1000);
+  let timeFrom, timeTill;
+  if (fromDate && toDate) {
+    timeFrom = Math.floor(new Date(fromDate).getTime() / 1000);
+    timeTill = Math.floor(new Date(toDate).getTime() / 1000);
+  } else {
+    const periods = {
+      '5m': 300, '15m': 900, '30m': 1800, '1h': 3600,
+      '3h': 10800, '6h': 21600, '12h': 43200, '1d': 86400,
+      '2d': 172800, '7d': 604800, '30d': 2592000,
+      '60d': 5184000, '1y': 31536000,
+    };
+    const seconds = periods[period] || 86400;
+    timeFrom = now - seconds;
+    timeTill = now;
+  }
+  const useHistory = (timeTill - timeFrom) <= 604800;
+
+  const [items, memItems, diskItems, dbItems] = await Promise.all([
+    call('item.get', { output: ['itemid', 'name', 'key_', 'units', 'value_type'], hostids: [hostId], filter: { status: 0 }, search: { key_: 'system.cpu.util' } }, false),
+    call('item.get', { output: ['itemid', 'name', 'key_', 'units', 'value_type'], hostids: [hostId], filter: { status: 0 }, search: { key_: 'vm.memory.util' } }, false),
+    call('item.get', { output: ['itemid', 'name', 'key_', 'units', 'value_type'], hostids: [hostId], filter: { status: 0 }, searchWildcardsEnabled: true, search: { key_: 'vfs.fs.dependent.size*pused*' } }, false),
+    call('item.get', { output: ['itemid', 'name', 'key_', 'units', 'value_type'], hostids: [hostId], filter: { status: 0, type: 11 }, value_type: [0,3] }, false),
+  ]);
+
+  async function fetchData(itemIds) {
+    if (!itemIds.length) return [];
+    if (useHistory) {
+      return call('history.get', { output: 'extend', history: 0, itemids: itemIds, time_from: timeFrom, time_till: timeTill, sortfield: 'clock', sortorder: 'ASC', limit: 1000 }, false);
+    } else {
+      return call('trend.get', { output: 'extend', itemids: itemIds, time_from: timeFrom, time_till: timeTill, sortfield: 'clock', sortorder: 'ASC', limit: 1000 }, false);
+    }
+  }
+
+  function buildSeries(data, itemId, isTrend) {
+    return data
+      .filter(d => d.itemid === String(itemId))
+      .map(d => ({ time: parseInt(d.clock) * 1000, value: parseFloat(isTrend ? d.value_avg : d.value) }))
+      .filter(d => !isNaN(d.value));
+  }
+
+  function analyzePattern(series) {
+    if (!series.length) return null;
+    const values = series.map(d => d.value);
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const maxPoint = series[values.indexOf(max)];
+    const hourCounts = {};
+    series.forEach(d => { const h = new Date(d.time).getHours(); hourCounts[h] = (hourCounts[h] || 0) + 1; });
+    const peakHour = Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+    return { avg: avg.toFixed(1), max: max.toFixed(1), min: min.toFixed(1), peakHour, peakTime: maxPoint?.time };
+  }
+
+  const cpuIds = items.map(i => i.itemid);
+  const memIds = memItems.map(i => i.itemid);
+  const diskIds = diskItems.map(i => i.itemid);
+  const dbIds = dbItems.map(i => i.itemid);
+
+  const [cpuData, memData, diskData, dbData] = await Promise.all([fetchData(cpuIds), fetchData(memIds), fetchData(diskIds), fetchData(dbIds)]);
+
+  const cpuSeries = cpuIds.length ? buildSeries(cpuData, cpuIds[0], !useHistory) : [];
+  const memSeries = memIds.length ? buildSeries(memData, memIds[0], !useHistory) : [];
+  const diskSeries = diskItems.map(item => {
+    const data = buildSeries(diskData, item.itemid, !useHistory);
+    return {
+      name: item.name.replace('FS [', '').replace(']: Space usage graph, in % (relative to max available)', '').replace(']: Percentage of used space', '') || item.key_,
+      key: item.key_, data, analysis: analyzePattern(data),
+    };
+  }).filter(s => s.data.length > 0);
+
+  const dbSeries = dbItems.map(item => {
+    const data = buildSeries(dbData, item.itemid, !useHistory);
+    return { name: item.name, key: item.key_, data, analysis: analyzePattern(data) };
+  }).filter(s => s.data.length > 0);
+
+  return {
+    period, cpu: { series: cpuSeries, analysis: analyzePattern(cpuSeries) },
+    memory: { series: memSeries, analysis: analyzePattern(memSeries) },
+    disk: diskSeries, db: dbSeries, generatedAt: new Date().toLocaleString('pt-BR'),
+  };
+}
+
+async function getAuditLogEnriched(timeFrom, timeTill) {
+  try {
+    const logs = await call('auditlog.get', {
+      output: 'extend',
+      sortfield: 'clock', sortorder: 'DESC',
+      limit: 5000,
+    }, false, 0);
+    // Filtra pelo período já que o Zabbix 6 não suporta time_from/time_till no auditlog
+    const filtered = logs.filter(l => {
+      const clock = parseInt(l.clock);
+      return clock >= timeFrom && clock <= timeTill;
+    });
+
+    const itemLogs    = filtered.filter(l => String(l.resourcetype) === '15');
+    const triggerLogs = filtered.filter(l => String(l.resourcetype) === '13');
+    const itemIds     = itemLogs.map(l => l.resourceid).filter(Boolean);
+    const triggerIds  = triggerLogs.map(l => l.resourceid).filter(Boolean);
+
+    let itemsMap = {}, triggersMap = {};
+
+    if (itemIds.length) {
+      try {
+        const items = await call('item.get', {
+          output: ['itemid', 'name', 'hostid'],
+          selectHosts: ['hostid', 'name', 'host'],
+          itemids: itemIds,
+        }, false);
+        items.forEach(i => {
+          if (i.hosts?.[0]) itemsMap[i.itemid] = { ...i.hosts[0], isTemplate: false };
+        });
+
+        // Busca também em templates
+        const missing = itemIds.filter(id => !itemsMap[id]);
+        if (missing.length) {
+          const titems = await call('item.get', {
+            output: ['itemid', 'name', 'hostid'],
+            selectHosts: ['hostid', 'name', 'host'],
+            itemids: missing,
+            webitems: true,
+          }, false);
+          titems.forEach(i => {
+            if (i.hosts?.[0]) itemsMap[i.itemid] = { ...i.hosts[0], isTemplate: false };
+          });
+        }
+      } catch {}
+    }
+
+    if (triggerIds.length) {
+      try {
+        const triggers = await call('trigger.get', {
+          output: ['triggerid', 'description', 'templateid'],
+          selectHosts: ['hostid', 'name', 'host'],
+          triggerids: triggerIds,
+        }, false);
+
+        const tplIds = [];
+        triggers.forEach(t => {
+          if (t.hosts?.[0]) {
+            triggersMap[t.triggerid] = { ...t.hosts[0], isTemplate: false };
+          } else if (t.templateid && t.templateid !== '0') {
+            tplIds.push(t.templateid);
+          }
+        });
+
+        if (tplIds.length) {
+          const tpls = await call('template.get', {
+            output: ['templateid', 'name', 'host'],
+            templateids: [...new Set(tplIds)],
+          }, false);
+          const tplMap = {};
+          tpls.forEach(t => { tplMap[t.templateid] = t; });
+          triggers.forEach(t => {
+            if (!triggersMap[t.triggerid] && t.templateid && tplMap[t.templateid]) {
+              triggersMap[t.triggerid] = { name: tplMap[t.templateid].name, host: tplMap[t.templateid].host, isTemplate: true };
+            }
+          });
+        }
+      } catch {}
+    }
+
+    return filtered.map(l => {
+      let parentHost = null;
+      if (String(l.resourcetype) === '15' && l.resourceid) parentHost = itemsMap[l.resourceid] || null;
+      if (String(l.resourcetype) === '13' && l.resourceid) parentHost = triggersMap[l.resourceid] || null;
+      return { ...l, parentHost };
+    });
+  } catch (err) {
+    console.error('❌ auditlog enrich falhou:', err.message);
+    return [];
+  }
+}
+
+
+module.exports = { friendlyTriggerName,
+  getAllHosts, getHostsByGroups, getHostsCount, getDisabledHosts,
+  getTemplates, getTemplateItems, getTemplateTriggers,
+  getHostItems, getHostTriggers, getHostAlerts, getHostHealth,
+  getZabbixAuditLog, getZabbixVersion, getZabbixStatus,
+  getRecentAlerts, getTopHostsWithProblems, getItemsWithError, getAlertHistory,
+  getTriggersActive, getAllTriggers, getHostTrends,
+  getItems, getDashboardStats, getHostMacros, resolveMacros, getHostGroups, authenticate, call, getAuditLogEnriched, setCurrentConnection,
+  getAuditLogEnriched, setCurrentConnection,
+};
+
+
 
 function formatDelay(delay) {
   if (!delay) return 'N/A';

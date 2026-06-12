@@ -4,10 +4,21 @@ const { db } = require('../db/database');
 const axios = require('axios');
 const router = express.Router();
 
-// Listar todas as conexões
+// Listar conexões (admin vê todas, viewer vê só as da sua área)
 router.get('/', authMiddleware, (req, res) => {
   try {
-    const conns = db.prepare('SELECT id, name, url, auth_type, username, active, created_at, updated_at FROM zabbix_connections ORDER BY created_at DESC').all();
+    if (req.user.role === 'admin' || req.user.role === 'manager') {
+      const conns = db.prepare('SELECT id, name, url, auth_type, username, active, created_at, updated_at FROM zabbix_connections ORDER BY created_at DESC').all();
+      return res.json(conns);
+    }
+    const user = db.prepare('SELECT area_id FROM users WHERE id=?').get(req.user.id);
+    if (!user?.area_id) return res.json([]);
+    const area = db.prepare('SELECT zabbix_connection_ids FROM areas WHERE id=?').get(user.area_id);
+    if (!area) return res.json([]);
+    const connIds = JSON.parse(area.zabbix_connection_ids || '[]');
+    if (connIds.length === 0) return res.json([]);
+    const placeholders = connIds.map(() => '?').join(',');
+    const conns = db.prepare(`SELECT id, name, url, auth_type, username, active, created_at, updated_at FROM zabbix_connections WHERE id IN (${placeholders}) ORDER BY created_at DESC`).all(...connIds);
     res.json(conns);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

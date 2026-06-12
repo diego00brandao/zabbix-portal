@@ -15,6 +15,7 @@ if (typeof document !== 'undefined' && !document.getElementById('pulse-styles'))
 }
 
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceArea } from 'recharts';
 import api from '../services/api';
 
@@ -66,7 +67,7 @@ function ItemsTable({ items }) {
       <input placeholder="Filtrar itens..." value={filter} onChange={e => setFilter(e.target.value)}
         style={{ ...styles.searchInput, marginBottom: '10px', width: '100%' }} />
       <div style={styles.detailTableHeader}>
-        <span>Nome</span><span>Tipo</span><span>Intervalo</span><span>Detalhes</span>
+        <span>Nome</span><span>Tipo</span><span>Intervalo</span><span>Última Coleta</span><span>Valor</span>
       </div>
       {filtered.map(item => (
         <div key={item.itemid} style={{ ...styles.detailRow, ...(item.status === '1' ? { opacity: 0.5 } : {}) }}>
@@ -79,13 +80,8 @@ function ItemsTable({ items }) {
           </div>
           <span style={styles.typeBadge}>{item.typeLabel}</span>
           <span style={styles.mono}>{item.delayFormatted}</span>
-          <div>
-            {item.params
-              ? <pre style={styles.queryPre}>{item.params}</pre>
-              : item.description
-                ? <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.description}</span>
-                : <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>—</span>}
-          </div>
+          <span style={styles.mono}>{item.lastclock && parseInt(item.lastclock) > 0 ? new Date(parseInt(item.lastclock)*1000).toLocaleString('pt-BR') : '—'}</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{(() => { const v = item.lastvalue; const u = item.units; if (!v || v === '') return '—'; const n = parseFloat(v); if (isNaN(n)) return v; if (u === 'B' || u === 'Bps') { if (n >= 1073741824) return (n/1073741824).toFixed(2) + ' G' + u; if (n >= 1048576) return (n/1048576).toFixed(2) + ' M' + u; if (n >= 1024) return (n/1024).toFixed(2) + ' K' + u; return n.toFixed(2) + ' ' + u; } if (u === 'bps') { if (n >= 1000000) return (n/1000000).toFixed(2) + ' Mbps'; if (n >= 1000) return (n/1000).toFixed(2) + ' Kbps'; return n.toFixed(2) + ' bps'; } if (u === 'ms') { if (n >= 1000) return (n/1000).toFixed(2) + ' s'; return n.toFixed(2) + ' ms'; } if (u === 's') { if (n >= 86400) return (n/86400).toFixed(1) + ' d'; if (n >= 3600) return (n/3600).toFixed(1) + ' h'; if (n >= 60) return (n/60).toFixed(1) + ' m'; return n.toFixed(2) + ' s'; } if (u === 'unixtime') return new Date(n*1000).toLocaleString('pt-BR'); if (u === 'unixtime') return new Date(n*1000).toLocaleString('pt-BR'); if (u === '%') return n.toFixed(2) + ' %'; if (u) return n.toFixed(2) + ' ' + u; return n.toFixed(2); })()}</span>
         </div>
       ))}
       {filtered.length === 0 && <div style={styles.empty}>Nenhum item para "{filter}"</div>}
@@ -93,12 +89,51 @@ function ItemsTable({ items }) {
   );
 }
 
-function TriggersTable({ triggers }) {
+
+function friendlyTriggerName(expression, description) {
+  if (!expression) return null;
+  const e = (expression||'').toLowerCase();
+  const d = (description||'').toLowerCase();
+  if (e.includes('memory.util')||e.includes('vm.memory')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `Memória acima de ${m[1]}%` : 'Memória elevada';
+  }
+  if (e.includes('cpu.util')||e.includes('system.cpu')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `CPU acima de ${m[1]}%` : 'CPU elevada';
+  }
+  if (e.includes('vfs.fs')||e.includes('disk')) {
+    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `Disco acima de ${m[1]}%` : 'Uso de disco elevado';
+  }
+  if (e.includes('nodata')||(e.includes('agent.ping')&&e.includes('=1'))) {
+    const m = expression.match(/nodata.*?(\d+)([mhd])/i);
+    return m ? `Sem dados há ${m[1]}${m[2]}` : 'Host sem comunicação';
+  }
+  if (d.includes('replication')) return 'Problema de replicação';
+  if (d.includes('backup')) return 'Falha no backup';
+  if (d.includes('job')&&d.includes('fail')) return 'Jobs com falha';
+  if (d.includes('log file')) return 'Log file crescendo';
+  if (d.includes('identity')) return 'Identity quase esgotado';
+  if (d.includes('disk')||d.includes('utilization d:')) return 'Disco acima do limite';
+  if (d.includes('node is down')||d.includes('icmp ping')) return 'Host sem resposta ICMP';
+  if (d.includes('agent down')) return 'Agente Zabbix inativo';
+  return null;
+}
+
+function timeAgo(ts) {
+  if (!ts || ts === '0') return '\u2014';
+  const diff = Math.floor(Date.now() / 1000) - parseInt(ts);
+  if (diff < 60) return 'h\u00e1 menos de 1 min';
+  if (diff < 3600) return `h\u00e1 ${Math.floor(diff/60)} min`;
+  if (diff < 86400) return `h\u00e1 ${Math.floor(diff/3600)}h`;
+  if (diff < 2592000) return `h\u00e1 ${Math.floor(diff/86400)} dia${Math.floor(diff/86400)>1?'s':''}`;
+  if (diff < 31536000) return `h\u00e1 ${Math.floor(diff/2592000)} m\u00eas${Math.floor(diff/2592000)>1?'es':''}`;
+  return `h\u00e1 ${Math.floor(diff/31536000)} ano${Math.floor(diff/31536000)>1?'s':''}`;
+}
+function TriggersTable({ triggers, showTimeAgo }) {
   if (!triggers?.length) return <div style={styles.empty}>Nenhum trigger encontrado</div>;
   return (
     <div>
       <div style={styles.detailTableHeader2}>
-        <span>Trigger</span><span>Severidade</span><span>Status</span>
+        <span>Trigger</span><span>Severidade</span><span>{showTimeAgo ? 'Dura\u00e7\u00e3o' : 'Status'}</span>
       </div>
       {triggers.map(t => {
         const sev = SEV[t.priority] || SEV['0'];
@@ -106,15 +141,15 @@ function TriggersTable({ triggers }) {
           <div key={t.triggerid} style={styles.detailRow2}>
             <div>
               <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{t.description}</div>
-              {t.expression && <div style={{ ...styles.mono, fontSize: '11px', marginTop: '2px', color: 'var(--text-muted)' }}>{t.expression.slice(0, 100)}…</div>}
-              {t.lastchange && parseInt(t.lastchange) > 0 && (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Desde: {new Date(parseInt(t.lastchange) * 1000).toLocaleString('pt-BR')}
-                </div>
-              )}
+              {t.expression && <div style={{ fontSize: '11px', marginTop: '2px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t.expression.slice(0, 120)}…</div>}
+
+
             </div>
             <span style={{ fontSize: '12px', fontWeight: 600, color: sev.c, fontFamily: 'var(--font-mono)' }}>{sev.l}</span>
-            <span><span className={`badge ${t.status === '0' ? 'badge-ok' : 'badge-info'}`}>{t.status === '0' ? 'Ativo' : 'Desabilitado'}</span></span>
+            {showTimeAgo
+              ? <span style={{ fontSize: '12px', color: 'var(--orange)', fontFamily: 'var(--font-mono)' }}>{timeAgo(t.lastchange)}</span>
+              : <span><span className={`badge ${t.status === '0' ? 'badge-ok' : 'badge-info'}`}>{t.status === '0' ? 'Ativo' : 'Desabilitado'}</span></span>
+            }
           </div>
         );
       })}
@@ -132,7 +167,7 @@ function TimelineTab({ alerts }) {
         return (
           <div key={alert.triggerid} style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', padding: '12px 14px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <div style={{ minWidth: '70px', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {alert.lastchange ? new Date(parseInt(alert.lastchange) * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+              {alert.lastchange ? new Date(parseInt(alert.lastchange) * 1000).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '--:--'}
             </div>
             <div style={{ width: '10px', height: '10px', borderRadius: '999px', marginTop: '4px', background: sev.c, flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
@@ -161,6 +196,7 @@ function HostsList({ hosts }) {
 }
 
 function HealthReport({ health, onDownloadJSON, onDownloadCSV, onDownloadExcel, onTemplateClick }) {
+  const { user } = useAuth();
   if (!health) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {Array(4).fill(0).map((_, i) => <div key={i} className="skeleton" style={{ height: '44px', borderRadius: 'var(--radius)' }} />)}
@@ -183,7 +219,7 @@ function HealthReport({ health, onDownloadJSON, onDownloadCSV, onDownloadExcel, 
         ))}
       </div>
 
-      {host.parentTemplates?.length > 0 && (
+      {host.parentTemplates?.length > 0 && (user?.role === 'admin' || user?.role === 'manager') && (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--gold)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '8px' }}>◫ Templates Vinculados</div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -198,9 +234,15 @@ function HealthReport({ health, onDownloadJSON, onDownloadCSV, onDownloadExcel, 
       )}
 
       {alerts.length > 0 && (
-        <div style={{ background: 'var(--red-dim)', border: '1px solid rgba(255,87,87,0.2)', borderRadius: 'var(--radius)', padding: '14px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--red)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '8px' }}>◉ Alertas Ativos Agora</div>
-          {alerts.map(a => {
+        <div style={{ background: 'var(--red-dim)', border: '1px solid rgba(255,87,87,0.2)', borderRadius: 'var(--radius)', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '16px' }}>◉</span>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--red)' }}>{alerts.length} alerta{alerts.length > 1 ? 's' : ''} ativo{alerts.length > 1 ? 's' : ''} agora</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>— veja a aba Alertas para detalhes</span>
+        </div>
+      )}
+      {false && alerts.length > 0 && (
+        <div>
+          {[...alerts].sort((a,b) => parseInt(b.lastchange||0) - parseInt(a.lastchange||0)).map(a => {
             const sev = SEV[a.priority] || SEV['0'];
             return (
               <div key={a.triggerid} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,87,87,0.1)' }}>
@@ -208,7 +250,7 @@ function HealthReport({ health, onDownloadJSON, onDownloadCSV, onDownloadExcel, 
                 <span style={{ fontSize: '13px', color: 'var(--text-primary)', flex: 1 }}>{a.description}</span>
                 {a.lastchange && parseInt(a.lastchange) > 0 && (
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {new Date(parseInt(a.lastchange) * 1000).toLocaleString('pt-BR')}
+                    {timeAgo(a.lastchange)}
                   </span>
                 )}
               </div>
@@ -460,12 +502,66 @@ function TrendsTab({ hostId }) {
   );
 }
 
+
+const TECH_MAP = [
+  { key: 'all',     label: 'Todos',       icon: '◈',  color: 'var(--text-accent)', keywords: [] },
+  { key: 'mssql',   label: 'SQL Server',  icon: '🗄',  color: '#e74c3c', keywords: ['mssql','sqlserver','sql server'] },
+  { key: 'oracle',  label: 'Oracle',      icon: '🔶',  color: '#f39c12', keywords: ['oracle'] },
+  { key: 'mysql',   label: 'MySQL',       icon: '🐬',  color: '#3498db', keywords: ['mysql'] },
+  { key: 'postgres',label: 'PostgreSQL',  icon: '🐘',  color: '#2980b9', keywords: ['postgres','postgresql'] },
+  { key: 'linux',   label: 'Linux',       icon: '🐧',  color: '#27ae60', keywords: ['linux','ubuntu','debian','centos','rhel','zabbix agent'] },
+  { key: 'windows', label: 'Windows',     icon: '🪟',  color: '#2980b9', keywords: ['windows','win'] },
+  { key: 'vmware',  label: 'VMware',      icon: '☁',  color: '#8e44ad', keywords: ['vmware','vsphere','esxi'] },
+  { key: 'network', label: 'Rede',        icon: '🌐',  color: '#16a085', keywords: ['cisco','network','switch','router','firewall'] },
+  { key: 'aws',     label: 'AWS/RDS',     icon: '☁',  color: '#f39c12', keywords: ['aws','rds','ec2','amazon'] },
+];
+
+function detectHostTech(host) {
+  const templates = host.parentTemplates || [];
+  const allNames = templates.map(t => t.name.toLowerCase()).join(' ');
+  for (const tech of TECH_MAP) {
+    if (tech.key === 'all') continue;
+    if (tech.keywords.some(k => allNames.includes(k))) return tech.key;
+  }
+  return 'other';
+}
+
+
+function AnomalyBanner({ anomalies }) {
+  const [dismissed, setDismissed] = React.useState(false);
+  if (dismissed || !anomalies || anomalies.length === 0) return null;
+  return (
+    <div style={{ background:'rgba(255,159,67,0.08)', border:'1px solid rgba(255,159,67,0.3)', borderRadius:'var(--radius-lg)', padding:'14px 18px', marginBottom:'16px', position:'relative' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }}>
+        <span style={{ fontSize:'16px' }}>⚡</span>
+        <span style={{ fontSize:'13px', fontWeight:600, color:'#ff9f43' }}>Anomaly Detection — {anomalies.length} host{anomalies.length!==1?'s':''} com comportamento anômalo</span>
+        <button onClick={()=>setDismissed(true)} style={{ marginLeft:'auto', background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer', fontSize:'16px' }}>✕</button>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:'5px' }}>
+        {anomalies.slice(0,5).map((a,i)=>(
+          <div key={i} style={{ display:'flex', alignItems:'center', gap:'10px', fontSize:'12px' }}>
+            <span style={{ color:'#ff9f43' }}>▸</span>
+            <span style={{ fontWeight:600, color:'var(--text-accent)' }}>{a.host}</span>
+            <span style={{ color:'var(--text-muted)' }}>—</span>
+            <span style={{ color:'var(--text-secondary)' }}>{a.reason}</span>
+            {a.value&&<span style={{ color:'#ff9f43', fontFamily:'var(--font-mono)', fontWeight:600 }}>{a.value}</span>}
+          </div>
+        ))}
+        {anomalies.length>5&&<div style={{ fontSize:'11px', color:'var(--text-muted)', marginTop:'4px' }}>+{anomalies.length-5} outros</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Hosts() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [hosts, setHosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [anomalies, setAnomalies] = useState([]);
   const [filter, setFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [techFilter, setTechFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [health, setHealth] = useState(null);
@@ -474,17 +570,36 @@ export function Hosts() {
   const [selectedHosts, setSelectedHosts] = useState([]);
   const [multiHealth, setMultiHealth] = useState(null);
   const [multiLoading, setMultiLoading] = useState(false);
+  const [hostMeta, setHostMeta] = useState(null);
+  const [metaSaving, setMetaSaving] = useState(false);
 
   useEffect(() => {
-    api.get('/api/zabbix/hosts').then(r => setHosts(r.data)).finally(() => setLoading(false));
+    api.get('/api/zabbix/hosts').then(r => {
+      setHosts(r.data);
+      const anom = [];
+      (r.data||[]).forEach(h => {
+        const alertCount = h.activeAlerts || 0;
+        if (alertCount >= 5) anom.push({ host: h.name||h.host, reason: 'Muitos alertas ativos', value: alertCount+' alertas' });
+        else if (h.available==='2') anom.push({ host: h.name||h.host, reason: 'Host indisponível', value: 'UNAVAILABLE' });
+      });
+      setAnomalies(anom);
+    }).finally(() => setLoading(false));
   }, []);
 
+  async function loadHostMeta(hostid) {
+    try {
+      const r = await api.get(`/api/host-metadata/${hostid}`);
+      setHostMeta(r.data);
+    } catch { setHostMeta({}); }
+  }
   async function openHost(h) {
     setSelected(h);
     setDetailTab('health');
     setDetail(null);
     setHealth(null);
+    setHostMeta(null);
     setDetailLoading(true);
+    loadHostMeta(h.hostid);
     try {
       const [healthRes, itemsRes, triggersRes, alertsRes] = await Promise.all([
         api.get(`/api/zabbix/host/${h.hostid}/health`),
@@ -645,13 +760,44 @@ export function Hosts() {
     if (detailTab === 'triggers') return <TriggersTable triggers={detail?.triggers || []} />;
     if (detailTab === 'alerts') return (detail?.alerts || []).length === 0
       ? <div style={{ ...styles.empty, color: 'var(--green)' }}>✓ Nenhum alerta ativo neste servidor</div>
-      : <TriggersTable triggers={detail.alerts} />;
+      : <TriggersTable triggers={[...detail.alerts].sort((a,b)=>parseInt(b.lastchange||0)-parseInt(a.lastchange||0))} showTimeAgo />;
     if (detailTab === 'trends') return <TrendsTab hostId={selected?.hostid} />;
     if (detailTab === 'timeline') return <TimelineTab alerts={detail?.alerts || []} />;
+    if (detailTab === 'meta') return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>Informações adicionais sobre este host — salvas localmente no portal.</div>
+        {!hostMeta ? (
+          <div className="skeleton" style={{ height: '140px', borderRadius: 'var(--radius)' }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Responsável</label>
+              <input value={hostMeta.responsible || ''} onChange={e => setHostMeta(m => ({ ...m, responsible: e.target.value }))} placeholder="Nome do responsável pelo host..." style={{ width: '100%', marginTop: '4px', padding: '8px 10px', background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Criticidade</label>
+              <select value={hostMeta.criticality || 'medium'} onChange={e => setHostMeta(m => ({ ...m, criticality: e.target.value }))} style={{ width: '100%', marginTop: '4px', padding: '8px 10px', background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text-primary)', fontSize: '13px', boxSizing: 'border-box' }}>
+                <option value="low">🟢 Baixa</option>
+                <option value="medium">🟡 Média</option>
+                <option value="high">🟠 Alta</option>
+                <option value="critical">🔴 Crítica</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notas</label>
+              <textarea value={hostMeta.notes || ''} onChange={e => setHostMeta(m => ({ ...m, notes: e.target.value }))} placeholder="Observações sobre o host..." rows={4} style={{ width: '100%', marginTop: '4px', padding: '8px 10px', background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text-primary)', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+            </div>
+            <button onClick={async () => { setMetaSaving(true); try { await api.put(`/api/host-metadata/${selected.hostid}`, { ...hostMeta, hostname: selected.name }); } catch(e) { console.error(e); } setMetaSaving(false); }} style={{ alignSelf: 'flex-start', padding: '8px 20px', background: 'var(--gold)', border: 'none', borderRadius: 'var(--radius)', color: '#1a1a2e', fontWeight: 600, fontSize: '13px', cursor: metaSaving ? 'not-allowed' : 'pointer', opacity: metaSaving ? 0.7 : 1 }}>{metaSaving ? 'Salvando...' : '💾 Salvar Metadados'}</button>
+          </div>
+        )}
+      </div>
+    );
     return null;
   }
 
+  const techCounts = TECH_MAP.slice(1).reduce((acc, t) => { acc[t.key] = hosts.filter(h => detectHostTech(h) === t.key).length; return acc; }, {});
   const filtered = hosts.filter(h => {
+    if (techFilter !== 'all' && detectHostTech(h) !== techFilter) return false;
     const matchText = !filter || h.name?.toLowerCase().includes(filter.toLowerCase()) || h.interfaces?.[0]?.ip?.includes(filter);
     const matchStatus = statusFilter === 'all' || (statusFilter === 'active' && h.status === '0') || (statusFilter === 'disabled' && h.status === '1');
     return matchText && matchStatus;
@@ -663,6 +809,24 @@ export function Hosts() {
         <div>
           <h1 style={styles.title}>Servidores</h1>
           <p style={styles.sub}>{hosts.length} hosts monitorados</p>
+      <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', margin:'14px 0' }}>
+        {TECH_MAP.map(tech => {
+          const count = tech.key === 'all' ? hosts.length : (techCounts[tech.key] || 0);
+          if (tech.key !== 'all' && count === 0) return null;
+          return (
+            <button key={tech.key} onClick={() => setTechFilter(tech.key)}
+              style={{ display:'flex', alignItems:'center', gap:'6px', padding:'6px 12px', borderRadius:'var(--radius)', border:'1px solid', fontSize:'12px', cursor:'pointer', transition:'all 0.15s',
+                background: techFilter === tech.key ? tech.color+'18' : 'var(--bg-surface)',
+                color: techFilter === tech.key ? tech.color : 'var(--text-muted)',
+                borderColor: techFilter === tech.key ? tech.color+'50' : 'var(--border)',
+                fontWeight: techFilter === tech.key ? 600 : 400,
+              }}>
+              <span>{tech.icon}</span><span>{tech.label}</span>
+              <span style={{ fontSize:'10px', fontFamily:'var(--font-mono)', opacity:0.8 }}>{count}</span>
+            </button>
+          );
+        })}
+      </div>
         </div>
  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {selectedHosts.length > 0 && (
@@ -703,9 +867,9 @@ export function Hosts() {
       </div>
 
       <div style={styles.table}>  
-<div style={{ ...styles.row, ...styles.headerRow, gridTemplateColumns: '32px 2fr 130px 100px 130px 1fr' }}>
+<div style={{ ...styles.row, ...styles.headerRow, gridTemplateColumns: user?.role === 'viewer' ? '32px 2fr 130px 100px 130px' : '32px 2fr 130px 100px 130px 1fr' }}>
           <span></span>
-          <span>Servidor</span><span>IP</span><span>Status</span><span>Disponibilidade</span><span>Grupos</span>
+          <span>Servidor</span><span>IP</span><span>Status</span><span>Disponibilidade</span>{user?.role !== 'viewer' && <span>Grupos</span>}
         </div>
         {loading ? Array(6).fill(0).map((_, i) =>
           <div key={i} className="skeleton" style={{ height: '46px', margin: '4px 0', borderRadius: 'var(--radius)' }} />
@@ -713,7 +877,7 @@ export function Hosts() {
           const isSelected = selectedHosts.find(x => x.hostid === h.hostid);
           return (
             <div key={h.hostid}
-              style={{ ...styles.row, gridTemplateColumns: '32px 2fr 130px 100px 130px 1fr', cursor: 'pointer', background: isSelected ? 'var(--blue-dim)' : 'transparent' }}
+              style={{ ...styles.row, gridTemplateColumns: user?.role === 'viewer' ? '32px 2fr 130px 100px 130px' : '32px 2fr 130px 100px 130px 1fr', cursor: 'pointer', background: isSelected ? 'var(--blue-dim)' : 'transparent' }}
               onClick={() => openHost(h)} className="animate-in"
               onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-hover)'; }}
               onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
@@ -735,7 +899,7 @@ export function Hosts() {
               <span style={styles.mono}>{h.interfaces?.[0]?.ip || h.interfaces?.[0]?.dns || '—'}</span>
               <span><span className={`badge ${h.status === '0' ? 'badge-ok' : 'badge-info'}`}>{h.status === '0' ? 'Ativo' : 'Desativado'}</span></span>
               <span><span className={`badge ${h.available === '1' ? 'badge-ok' : h.available === '2' ? 'badge-disaster' : 'badge-info'}`}>{h.available === '1' ? 'Online' : h.available === '2' ? 'Offline' : 'Desconhecido'}</span></span>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{h.groups?.map(g => g.name).join(', ') || '—'}</span>
+              {user?.role !== 'viewer' && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{h.groups?.map(g => g.name).join(', ') || '—'}</span>}
             </div>
           );
         })}
@@ -807,7 +971,7 @@ export function Hosts() {
               <span style={styles.tplStat}><span style={{ color: 'var(--gold)' }}>◫</span> {selected.parentTemplates.map(t => t.name).join(', ')}</span>
             )}
           </>}
-          tabs={[['health','♥ Saúde'],['items','≡ Itens'],['triggers','◉ Triggers'],['alerts','◎ Alertas'],['trends','◈ Tendências'],['timeline','◌ Timeline']]}
+          tabs={[['health','♥ Saúde'],['items','≡ Itens'],['triggers','◉ Triggers'],['alerts','◎ Alertas'],['timeline','◌ Timeline']]}
           activeTab={detailTab}
           onTabChange={tab => setDetailTab(tab)}
           onClose={() => setSelected(null)}
@@ -1043,9 +1207,9 @@ const styles = {
   tab: { background: 'none', border: 'none', borderBottom: '2px solid transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '13px', fontFamily: 'var(--font-sans)', padding: '10px 16px', transition: 'all 0.18s', whiteSpace: 'nowrap' },
   tabActive: { color: 'var(--gold)', borderBottomColor: 'var(--gold)' },
   modalBody: { overflowY: 'auto', padding: '16px 24px', flex: 1 },
-  detailTableHeader: { display: 'grid', gridTemplateColumns: '2fr 120px 80px 1fr', gap: '12px', padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' },
+  detailTableHeader: { display: 'grid', gridTemplateColumns: '2fr 120px 80px 130px 130px', gap: '12px', padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' },
   detailTableHeader2: { display: 'grid', gridTemplateColumns: '1fr 110px 100px', gap: '12px', padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '4px' },
-  detailRow: { display: 'grid', gridTemplateColumns: '2fr 120px 80px 1fr', gap: '12px', padding: '10px 12px', borderBottom: '1px solid var(--border)', alignItems: 'start' },
+  detailRow: { display: 'grid', gridTemplateColumns: '2fr 120px 80px 130px 130px', gap: '12px', padding: '10px 12px', borderBottom: '1px solid var(--border)', alignItems: 'start' },
   detailRow2: { display: 'grid', gridTemplateColumns: '1fr 110px 100px', gap: '12px', padding: '10px 12px', borderBottom: '1px solid var(--border)', alignItems: 'center' },
   typeBadge: { background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', padding: '2px 6px', fontSize: '11px', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', alignSelf: 'start', marginTop: '2px' },
   queryPre: { fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--purple)', background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: '4px', padding: '6px 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 },

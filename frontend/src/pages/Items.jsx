@@ -105,7 +105,7 @@ export default function Items() {
       <div style={styles.table}>
         <div style={styles.tableHeader}>
           <span>Nome</span>
-          <span>Template/Host</span>
+          <span>Template</span>
           <span>Tipo</span>
           <span>Intervalo</span>
         </div>
@@ -138,6 +138,11 @@ export default function Items() {
                   <span style={styles.host}>{item.hosts?.[0]?.name || '—'}</span>
                   <span style={styles.typeBadge}>{item.typeLabel}</span>
                   <span style={styles.mono}>{item.delayFormatted}</span>
+                  {item.lastclock && parseInt(item.lastclock) > 0 && (
+                    <span style={{...styles.mono, color:'var(--text-muted)', fontSize:'10px'}}>
+                      mod: {new Date(parseInt(item.lastclock)*1000).toLocaleString('pt-BR')}
+                    </span>
+                  )}
                 </div>
                 {isExp && hasQuery && (
                   <div style={{ background: 'var(--bg-card)', borderTop: '1px solid var(--border)', padding: '14px 20px' }}>

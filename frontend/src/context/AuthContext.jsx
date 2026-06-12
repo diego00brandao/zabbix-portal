@@ -36,12 +36,14 @@ export function AuthProvider({ children }) {
         const conns = connsRes.data;
         if (conns.length === 1) {
           selectConnection(conns[0]);
+          return { user, needsSelect: false };
         } else if (conns.length > 1) {
           setNeedsConnectionSelect(true);
+          return { user, needsSelect: true };
         }
       } catch {}
     }
-    return user;
+    return { user, needsSelect: false };
   }
 
   async function logout() {

@@ -19,6 +19,12 @@ const SEV_COLOR = {
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  
+  const [tools, setTools] = React.useState([]);
+  React.useEffect(() => {
+    api.get('/api/dashboard-links').then(r => setTools(r.data)).catch(() => {});
+  }, []);
+
   const [stats, setStats] = useState(null);
   const [extras, setExtras] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -86,26 +92,97 @@ export default function Dashboard() {
       {error && <div style={styles.errorBanner}>⚠ {error} — Verifique a configuração do Zabbix em <code>.env</code></div>}
 
       {/* KPI Cards */}
-      <div style={styles.grid}>
-        <KpiCard loading={loading} icon="⬡" label="Servidores Ativos"
-          value={stats?.enabledHosts} sub={`${stats?.disabledHosts || 0} desativados`}
-          color="var(--green)" bg="var(--green-dim)" onClick={() => navigate('/hosts?status=active')} />
-        <KpiCard loading={loading} icon="◫" label="Templates"
-          value={stats?.templates} sub="em uso no ambiente"
-          color="var(--blue)" bg="var(--blue-dim)" onClick={() => navigate('/templates')} />
-        <KpiCard loading={loading} icon="≡" label="Itens Ativos"
-          value={stats?.totalItems} sub={`${stats?.disabledItems || 0} desativados`}
-          color="var(--purple)" bg="var(--purple-dim)" onClick={() => navigate('/items?status=active')} />
-        <KpiCard loading={loading} icon="◉" label="Triggers Ativas"
-          value={stats?.activeTriggerCount} sub={`${stats?.disabledTriggers || 0} desativadas`}
-          color="var(--orange)" bg="var(--orange-dim)" onClick={() => navigate('/alltriggers?status=active')} />
-        <KpiCard loading={loading} icon="🔴" label="Alertas Ativos"
-          value={stats?.activeTriggers}
-          sub={stats?.triggersBySeverity?.disaster > 0 ? `${stats.triggersBySeverity.disaster} DISASTER!` : 'nenhum crítico'}
-          color={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red)' : 'var(--orange)'}
-          bg={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red-dim)' : 'var(--orange-dim)'}
-          urgent={stats?.triggersBySeverity?.disaster > 0} onClick={() => navigate('/triggers')} />
-      </div>
+      {tools.length > 0 && (
+        <div style={{ display:'flex', gap:'10px', flexWrap:'wrap', marginBottom:'20px' }}>
+          {tools.map(t => {
+            const colors = {zabbix:'#d40000',grafana:'#f46800',dynatrace:'#1496ff',servicenow:'#62d84e',datadog:'#632ca6',prometheus:'#e6522c',kibana:'#00bfb3',outro:'var(--gold)'};
+            const color = colors[t.tool_type] || colors.outro;
+            return (
+              <a key={t.id} href={t.url} target="_blank" rel="noopener noreferrer"
+                style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 14px', background:'var(--bg-surface)', border:`1px solid ${color}30`, borderRadius:'var(--radius)', textDecoration:'none' }}>
+                <div style={{ width:'24px', height:'24px', borderRadius:'6px', background:`${color}18`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'12px', fontWeight:700, color }}>{t.name[0].toUpperCase()}</div>
+                <span style={{ fontSize:'12px', fontWeight:500, color:'var(--text-accent)' }}>{t.name}</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
+      {(user?.role === 'admin' || user?.role === 'manager') ? (
+        <>
+        <div style={styles.grid}>
+          <KpiCard loading={loading} icon="⬡" label="Servidores Ativos"
+            value={stats?.enabledHosts} sub={`${stats?.disabledHosts || 0} desativados`}
+            color="var(--green)" bg="var(--green-dim)" onClick={() => navigate('/hosts?status=active')} />
+          <KpiCard loading={loading} icon="◫" label="Templates"
+            value={stats?.templates} sub="em uso no ambiente"
+            color="var(--blue)" bg="var(--blue-dim)" onClick={() => navigate('/templates')} />
+          <KpiCard loading={loading} icon="≡" label="Itens Ativos"
+            value={stats?.totalItems} sub={`${stats?.disabledItems || 0} desativados`}
+            color="var(--purple)" bg="var(--purple-dim)" onClick={() => navigate('/items?status=active')} />
+          <KpiCard loading={loading} icon="◉" label="Triggers Ativas"
+            value={stats?.activeTriggerCount} sub={`${stats?.disabledTriggers || 0} desativadas`}
+            color="var(--orange)" bg="var(--orange-dim)" onClick={() => navigate('/alltriggers?status=active')} />
+          <KpiCard loading={loading} icon="🔴" label="Alertas Ativos"
+            value={stats?.activeTriggers}
+            sub={stats?.triggersBySeverity?.disaster > 0 ? `${stats.triggersBySeverity.disaster} DISASTER!` : 'nenhum crítico'}
+            color={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red)' : 'var(--orange)'}
+            bg={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red-dim)' : 'var(--orange-dim)'}
+            urgent={stats?.triggersBySeverity?.disaster > 0} onClick={() => navigate('/triggers')} />
+        </div>
+        <div style={{ ...styles.card, marginBottom:'16px' }}>
+          <div style={styles.cardHeader}>
+            <span style={styles.cardTitle}>Histórico de Alertas — 7 dias</span>
+          </div>
+          {loadingExtras ? (
+            <div className="skeleton" style={{ height: '80px', borderRadius: 'var(--radius)' }} />
+          ) : !extras?.alertHistory?.length ? (
+            <div style={styles.emptyState}><p style={{ fontSize: '12px' }}>Sem dados de histórico</p></div>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={extras.alertHistory} margin={{ top: 4, right: 16, bottom: 0, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: '6px', fontSize: '12px' }} itemStyle={{ color: 'var(--text-primary)' }} />
+                <Line type="monotone" dataKey="count" stroke="#ff9f43" strokeWidth={2} dot={{ fill: '#ff9f43', r: 3 }} name="Alertas" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        </>
+      ) : (
+        <div style={{ display:'grid', gridTemplateColumns:'180px 180px 1fr', gap:'16px', marginBottom:'16px', alignItems:'stretch' }}>
+          <KpiCard loading={loading} icon="⬡" label="Servidores Ativos"
+            value={stats?.enabledHosts} sub={`${stats?.disabledHosts || 0} desativados`}
+            color="var(--green)" bg="var(--green-dim)" onClick={() => navigate('/hosts?status=active')} />
+          <KpiCard loading={loading} icon="🔴" label="Alertas Ativos"
+            value={stats?.activeTriggers}
+            sub={stats?.triggersBySeverity?.disaster > 0 ? `${stats.triggersBySeverity.disaster} DISASTER!` : 'nenhum crítico'}
+            color={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red)' : 'var(--orange)'}
+            bg={stats?.triggersBySeverity?.disaster > 0 ? 'var(--red-dim)' : 'var(--orange-dim)'}
+            urgent={stats?.triggersBySeverity?.disaster > 0} onClick={() => navigate('/triggers')} />
+          <div style={styles.card}>
+            <div style={styles.cardHeader}>
+              <span style={styles.cardTitle}>Histórico de Alertas — 7 dias</span>
+            </div>
+            {loadingExtras ? (
+              <div className="skeleton" style={{ height: '80px', borderRadius: 'var(--radius)' }} />
+            ) : !extras?.alertHistory?.length ? (
+              <div style={styles.emptyState}><p style={{ fontSize: '12px' }}>Sem dados de histórico</p></div>
+            ) : (
+              <ResponsiveContainer width="100%" height={80}>
+                <LineChart data={extras.alertHistory} margin={{ top: 4, right: 16, bottom: 0, left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: '6px', fontSize: '12px' }} itemStyle={{ color: 'var(--text-primary)' }} />
+                  <Line type="monotone" dataKey="count" stroke="#ff9f43" strokeWidth={2} dot={{ fill: '#ff9f43', r: 3 }} name="Alertas" />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Segunda linha: Alertas por Severidade + Últimos Alertas + Top Hosts */}
       <div style={styles.threeCol}>
@@ -202,29 +279,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Terceira linha: Histórico */}
-      <div style={{ marginTop: '16px' }}>
-        <div style={styles.card}>
-          <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>Histórico de Alertas — 7 dias</span>
-          </div>
-          {loadingExtras ? (
-            <div className="skeleton" style={{ height: '130px', borderRadius: 'var(--radius)' }} />
-          ) : !extras?.alertHistory?.length ? (
-            <div style={styles.emptyState}><p style={{ fontSize: '12px' }}>Sem dados de histórico</p></div>
-          ) : (
-            <ResponsiveContainer width="100%" height={140}>
-              <LineChart data={extras.alertHistory} margin={{ top: 4, right: 16, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: '6px', fontSize: '12px' }} itemStyle={{ color: 'var(--text-primary)' }} />
-                <Line type="monotone" dataKey="count" stroke="#ff9f43" strokeWidth={2} dot={{ fill: '#ff9f43', r: 3 }} name="Alertas" />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
+
     </div>
   );
 }
@@ -261,7 +316,7 @@ const styles = {
   errorBanner: { background: 'var(--red-dim)', border: '1px solid rgba(255,87,87,0.25)', borderRadius: 'var(--radius)', padding: '12px 16px', color: 'var(--red)', fontSize: '13px', marginBottom: '20px' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '20px' },
   threeCol: { display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '16px', marginBottom: '0' },
-  kpiCard: { background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', padding: '20px', display: 'flex', flexDirection: 'column', gap: '2px' },
+  kpiCard: { background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '2px' },
   kpiIcon: { width: '36px', height: '36px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', marginBottom: '4px' },
   kpiValue: { fontSize: '28px', fontWeight: 600, fontFamily: 'var(--font-mono)', lineHeight: 1.1, marginTop: '8px' },
   kpiLabel: { fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500, marginTop: '4px' },

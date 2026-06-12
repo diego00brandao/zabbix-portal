@@ -3,3 +3,6 @@ dist/
 .env
 *.log
 backend/db/*.db
+
+backend/uploads/
+frontend/node/

@@ -17,16 +17,20 @@ const NAV_SECTIONS = [
   {
     label: 'CONFIGURAÇÃO',
     items: [
-      { to: '/templates',    icon: '◫', label: 'Templates',      roles: ['admin','manager','viewer'] },
-      { to: '/items',        icon: '≡', label: 'Itens',          roles: ['admin','manager','viewer'] },
-      { to: '/alltriggers',  icon: '⊡', label: 'Triggers',       roles: ['admin','manager','viewer'] },
+      { to: '/templates',    icon: '◫', label: 'Templates',      roles: ['admin','manager'] },
+      { to: '/items-triggers', icon: '⊞', label: 'Itens & Triggers', roles: ['viewer'] },
+      { to: '/items',        icon: '≡', label: 'Itens',          roles: ['admin'] },
+      { to: '/alltriggers',  icon: '⊡', label: 'Triggers',       roles: ['admin'] },
     ]
   },
   {
     label: 'ANÁLISE',
     items: [
       { to: '/reports',      icon: '↯', label: 'Relatórios',     roles: ['admin','manager','viewer'] },
-      { to: '/changelog',    icon: '◎', label: 'Change Log',     roles: ['admin','manager','viewer'] },
+      
+      { to: '/changelog',    icon: '◎', label: 'Change Log',     roles: ['admin','manager'] },
+      { to: '/ferramentas',  icon: '⊕', label: 'Ferramentas',     roles: ['admin','manager'] },
+      { to: '/alfred',       icon: '◈', label: 'Alfred IA',       roles: ['admin','manager','viewer'] },
       { to: '/audit',        icon: '⊕', label: 'Audit Log',      roles: ['admin','manager'] },
     ]
   },
@@ -91,7 +95,7 @@ export default function Layout() {
               <div style={styles.userRole}>{roleLabel[user?.role] || user?.role}</div>
               {user?.areaName && <div style={styles.userArea}>{user.areaName}</div>}
             </div>
-            {selectedConnection && <button onClick={() => { localStorage.removeItem('selectedConnection'); setNeedsConnectionSelect(true); }} style={{ ...styles.logoutBtn, fontSize:'13px', marginRight:'4px' }} title="Trocar conexão">⇌</button>}
+            {selectedConnection && <button onClick={() => { localStorage.removeItem('selectedConnection'); window.location.href='/portal/select-connection'; }} style={{ ...styles.logoutBtn, fontSize:'13px', marginRight:'4px' }} title="Trocar conexão">⇌</button>}
             <button onClick={handleLogout} style={styles.logoutBtn} title="Sair">⏻</button>
           </>)}
         </div>

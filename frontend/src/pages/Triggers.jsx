@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
 const SEVERITY_MAP = {
@@ -12,10 +13,22 @@ const SEVERITY_MAP = {
 
 const PERIODS = ['5m','15m','30m','1h','3h','6h','12h','1d','2d','7d','30d','60d','1y'];
 
+
+function cleanTriggerName(desc) {
+  if (!desc) return desc;
+  return desc
+    .replace(/\[\w+\]\{\$[^}]+\}\s*/g, '')
+    .replace(/\{\$[^}]+\}\s*/g, '')
+    .replace(/^\s*[-–]\s*/, '')
+    .trim();
+}
+
 export default function Triggers() {
+  const { user } = useAuth();
   const [triggers, setTriggers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [techFilter, setTechFilter] = useState('');
   const [severity, setSeverity] = useState('');
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -91,6 +104,11 @@ export default function Triggers() {
   }
 
   const filtered = triggers.filter(t => {
+    const n = (t.hosts?.map(h=>h.name).join(' ')||'').toUpperCase();
+    if (techFilter === 'SQL' && !n.match(/SQL|PSQL|MSSQL|ORACLE|BD/)) return false;
+    if (techFilter === 'LINUX' && !n.match(/LNX|LINUX/)) return false;
+    if (techFilter === 'WINDOWS' && !n.match(/WIN|WND|W0[0-9]|SRV/)) return false;
+    if (techFilter === 'REDE' && !n.match(/RTR|SW|FW|NET/)) return false;
     const matchText = !filter ||
       t.description?.toLowerCase().includes(filter.toLowerCase()) ||
       t.hosts?.some(h => h.name?.toLowerCase().includes(filter.toLowerCase()));
@@ -185,6 +203,19 @@ export default function Triggers() {
       )}
 
       <div style={styles.filters}>
+        {(!user || user.role === 'admin' || user.role === 'manager') && (
+          <div style={{ display:'flex', gap:'8px', marginBottom:'12px', flexWrap:'wrap' }}>
+            {[['','Todos'],['SQL','🗄 Database'],['LINUX','🐧 Linux'],['WINDOWS','🖥 Windows'],['REDE','🌐 Rede']].map(([key,label])=>(
+              <button key={key} onClick={()=>setTechFilter(key)}
+                style={{ padding:'5px 14px', borderRadius:'var(--radius)', border:'1px solid', fontSize:'12px', cursor:'pointer',
+                  background: techFilter===key?'var(--gold-dim)':'var(--bg-hover)',
+                  color: techFilter===key?'var(--gold)':'var(--text-muted)',
+                  borderColor: techFilter===key?'rgba(201,168,76,0.4)':'var(--border)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <input placeholder="Filtrar por problema ou host..." value={filter} onChange={e => setFilter(e.target.value)} style={styles.searchInput} />
         <select value={severity} onChange={e => setSeverity(e.target.value)} style={styles.select}>
           <option value="">Todas severidades</option>
@@ -202,7 +233,7 @@ export default function Triggers() {
         <div style={styles.tableHeader}>
           <span>Severidade</span>
           <span>Problema</span>
-          <span>Host(s) Afetados</span>
+          <span>Template(s) Afetados</span>
           <span>{mode === 'history' ? 'Data/Hora' : 'Duração'}</span>
         </div>
         {loading ? (
@@ -225,7 +256,7 @@ export default function Triggers() {
               return (
                 <div key={t.triggerid} style={styles.row} className="animate-in">
                   <span><span className={`badge ${sev.cls}`}>{sev.label}</span></span>
-                  <span style={styles.cellMain}>{t.description}</span>
+                  <span style={styles.cellMain}>{cleanTriggerName(t.description)}</span>
                   <span style={styles.cellHost}>{t.hosts?.map(h => h.name).join(', ') || '—'}</span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
                     {timeSince(t.lastchange)}
