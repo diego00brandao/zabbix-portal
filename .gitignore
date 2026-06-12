@@ -6,3 +6,5 @@ backend/db/*.db
 
 backend/uploads/
 frontend/node/
+
+frontend/node
