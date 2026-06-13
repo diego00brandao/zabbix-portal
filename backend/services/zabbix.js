@@ -198,7 +198,7 @@ async function getTemplates(groupIds) {
     selectHosts: ['hostid', 'name'],
     selectItems: 'count',
     selectTriggers: 'count',
-  }, true, 300);
+  }, true, 86400);
 }
 
 async function getTemplateItems(templateId) {
@@ -207,12 +207,12 @@ async function getTemplateItems(templateId) {
       output: ['itemid', 'name', 'key_', 'type', 'delay', 'history', 'trends', 'units', 'params', 'status', 'description', 'error'],
       templateids: [templateId],
       limit: 500,
-    }, true, 180),
+    }, true, 86400),
     call('itemprototype.get', {
       output: ['itemid', 'name', 'key_', 'type', 'delay', 'units', 'params', 'status', 'description'],
       templateids: [templateId],
       limit: 500,
-    }, true, 180).catch(() => []),
+    }, true, 86400).catch(() => []),
   ]);
   const allItems = [...items, ...prototypes.map(p => ({ ...p, isPrototype: true }))];
   return allItems.map(item => ({
@@ -231,13 +231,13 @@ async function getTemplateTriggers(templateId) {
       templateids: [templateId],
       sortfield: 'priority', sortorder: 'DESC',
       expandExpression: true,
-    }, true, 180),
+    }, true, 86400),
     call('triggerprototype.get', {
       output: ['triggerid', 'description', 'priority', 'status', 'expression'],
       templateids: [templateId],
       sortfield: 'priority', sortorder: 'DESC',
       expandExpression: true,
-    }, true, 180).catch(() => []),
+    }, true, 86400).catch(() => []),
   ]);
   const all = [...triggers, ...prototypes.map(p => ({ ...p, isPrototype: true }))];
   return all.map(t => ({ ...t, templateid: templateId }));
