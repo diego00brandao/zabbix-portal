@@ -147,7 +147,7 @@ async function authenticate() {
   }
   const res = await zabbixAPI.post(process.env.ZABBIX_URL, {
     jsonrpc: '2.0', method: 'user.login',
-     params: { user: getActiveConnection()?.username || process.env.ZABBIX_USER, password: getActiveConnection()?.password || process.env.ZABBIX_PASSWORD },
+     params: { username: getActiveConnection()?.username || process.env.ZABBIX_USER, password: getActiveConnection()?.password || process.env.ZABBIX_PASSWORD },
     auth: null, id: 1,
   });
   if (res.data.error) throw new Error(`Falha na autenticação: ${res.data.error.message}`);
