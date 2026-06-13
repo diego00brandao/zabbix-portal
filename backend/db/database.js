@@ -31,6 +31,9 @@ async function initDB() {
       description TEXT,
       color TEXT DEFAULT '#3B82F6',
       zabbix_hostgroup_ids TEXT DEFAULT '[]',
+      zabbix_template_ids TEXT DEFAULT '[]',
+      zabbix_group_ids TEXT DEFAULT '[]',
+      zabbix_connection_ids TEXT DEFAULT '[]',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS users (
@@ -73,6 +76,8 @@ async function initDB() {
 
   // Migração — adiciona colunas se não existirem
   try { db.run(`ALTER TABLE areas ADD COLUMN zabbix_template_ids TEXT DEFAULT '[]'`); } catch {}
+  try { db.run(`ALTER TABLE areas ADD COLUMN zabbix_connection_ids TEXT DEFAULT '[]'`); } catch {}
+  try { db.run(`ALTER TABLE areas ADD COLUMN zabbix_group_ids TEXT DEFAULT '[]'`); } catch {}
 
   const areas = [
     ['Banco de Dados', 'Oracle, SQL Server, PostgreSQL, MongoDB', '#F59E0B', '[]'],
