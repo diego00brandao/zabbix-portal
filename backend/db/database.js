@@ -60,6 +60,53 @@ async function initDB() {
       data TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS dashboard_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      tool_type TEXT DEFAULT 'outro',
+      description TEXT
+    );
+    CREATE TABLE IF NOT EXISTS host_metadata (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hostid TEXT,
+      hostname TEXT,
+      responsible TEXT,
+      criticality TEXT,
+      notes TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS changelog_projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS changelog_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      title TEXT,
+      description TEXT,
+      related_resource TEXT,
+      resource_type TEXT,
+      ticket TEXT,
+      status TEXT DEFAULT 'todo',
+      progress INTEGER DEFAULT 0,
+      created_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS changelog_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER,
+      filename TEXT,
+      filepath TEXT,
+      size INTEGER,
+      mimetype TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS zabbix_connections (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
