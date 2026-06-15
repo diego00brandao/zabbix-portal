@@ -1,3 +1,4 @@
+import { interpretExpression } from '../utils/interpretExpression';
 import React, { useEffect, useState } from 'react';
 // pulse styles injected
 if (typeof document !== 'undefined' && !document.getElementById('pulse-styles')) {
@@ -90,33 +91,6 @@ function ItemsTable({ items }) {
 }
 
 
-function friendlyTriggerName(expression, description) {
-  if (!expression) return null;
-  const e = (expression||'').toLowerCase();
-  const d = (description||'').toLowerCase();
-  if (e.includes('memory.util')||e.includes('vm.memory')) {
-    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `Memória acima de ${m[1]}%` : 'Memória elevada';
-  }
-  if (e.includes('cpu.util')||e.includes('system.cpu')) {
-    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `CPU acima de ${m[1]}%` : 'CPU elevada';
-  }
-  if (e.includes('vfs.fs')||e.includes('disk')) {
-    const m = expression.match(/[><=!]+\s*([\d.]+)/); return m ? `Disco acima de ${m[1]}%` : 'Uso de disco elevado';
-  }
-  if (e.includes('nodata')||(e.includes('agent.ping')&&e.includes('=1'))) {
-    const m = expression.match(/nodata.*?(\d+)([mhd])/i);
-    return m ? `Sem dados há ${m[1]}${m[2]}` : 'Host sem comunicação';
-  }
-  if (d.includes('replication')) return 'Problema de replicação';
-  if (d.includes('backup')) return 'Falha no backup';
-  if (d.includes('job')&&d.includes('fail')) return 'Jobs com falha';
-  if (d.includes('log file')) return 'Log file crescendo';
-  if (d.includes('identity')) return 'Identity quase esgotado';
-  if (d.includes('disk')||d.includes('utilization d:')) return 'Disco acima do limite';
-  if (d.includes('node is down')||d.includes('icmp ping')) return 'Host sem resposta ICMP';
-  if (d.includes('agent down')) return 'Agente Zabbix inativo';
-  return null;
-}
 
 function timeAgo(ts) {
   if (!ts || ts === '0') return '\u2014';
@@ -129,19 +103,27 @@ function timeAgo(ts) {
   return `h\u00e1 ${Math.floor(diff/31536000)} ano${Math.floor(diff/31536000)>1?'s':''}`;
 }
 function TriggersTable({ triggers, showTimeAgo }) {
+  const [trigSearch, setTrigSearch] = React.useState('');
+  const filtered = (triggers||[]).filter(t => !trigSearch || (t.description||'').toLowerCase().includes(trigSearch.toLowerCase()));
   if (!triggers?.length) return <div style={styles.empty}>Nenhum trigger encontrado</div>;
   return (
     <div>
+      <input placeholder="Filtrar triggers..." value={trigSearch} onChange={e => setTrigSearch(e.target.value)} style={{ width:'100%', background:'var(--bg-surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 12px', color:'var(--text-primary)', fontSize:'12px', outline:'none', marginBottom:'8px', boxSizing:'border-box' }} />
       <div style={styles.detailTableHeader2}>
         <span>Trigger</span><span>Severidade</span><span>{showTimeAgo ? 'Dura\u00e7\u00e3o' : 'Status'}</span>
       </div>
-      {triggers.map(t => {
+      {filtered.map(t => {
         const sev = SEV[t.priority] || SEV['0'];
         return (
           <div key={t.triggerid} style={styles.detailRow2}>
             <div>
               <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{t.description}</div>
-              {t.expression && <div style={{ fontSize: '11px', marginTop: '2px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t.expression.slice(0, 120)}…</div>}
+              {t.expression && (() => {
+                const interpreted = interpretExpression(t.expression);
+                return interpreted
+                  ? <div style={{ fontSize: '11px', marginTop: '3px', color: 'var(--blue)', fontWeight: 500 }}>◈ {interpreted}</div>
+                  : <div style={{ fontSize: '11px', marginTop: '2px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{t.expression.slice(0, 120)}…</div>;
+              })()}
 
 
             </div>
